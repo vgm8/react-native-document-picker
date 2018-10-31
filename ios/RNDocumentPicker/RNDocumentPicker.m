@@ -26,21 +26,21 @@ static NSString *const FIELD_SIZE = @"size";
 
 @implementation RNDocumentPicker {
     NSMutableArray *composeViews;
-    NSMutableArray *composeResolvers;
-    NSMutableArray *composeRejecters;
+    NSMutableArray *_composeResolvers;
+    NSMutableArray *_composeRejecters;
 }
 
 @synthesize bridge = _bridge;
 
-- (instancetype)init
-{
-    if ((self = [super init])) {
-        composeResolvers = [[NSMutableArray alloc] init];
-        composeRejecters = [[NSMutableArray alloc] init];
-        composeViews = [[NSMutableArray alloc] init];
-    }
-    return self;
-}
+// - (instancetype)init
+// {
+//     if ((self = [super init])) {
+//         composeResolvers = [[NSMutableArray alloc] init];
+//         composeRejecters = [[NSMutableArray alloc] init];
+//         composeViews = [[NSMutableArray alloc] init];
+//     }
+//     return self;
+// }
 
 - (dispatch_queue_t)methodQueue
 {
@@ -55,42 +55,42 @@ RCT_EXPORT_METHOD(pick:(NSDictionary *)options
 {
     NSArray *allowedUTIs = [RCTConvert NSArray:options[OPTION_TYPE]];
     UIDocumentPickerViewController *documentPicker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:(NSArray *)allowedUTIs inMode:UIDocumentPickerModeImport];
-    
-    [composeResolvers addObject:resolve];
-    [composeRejecters addObject:reject];
-    
+
+    [[self composeResolvers] addObject:resolve];
+    [[self composeRejecters] addObject:reject];
+
     documentPicker.delegate = self;
     documentPicker.modalPresentationStyle = UIModalPresentationFormSheet;
-    
+
 #if __IPHONE_OS_VERSION_MAX_ALLOWED >= 110000
     if (@available(iOS 11, *)) {
         documentPicker.allowsMultipleSelection = [RCTConvert BOOL:options[OPTION_MULIPLE]];
     }
 #endif
-    
+
     UIViewController *rootViewController = [[[[UIApplication sharedApplication]delegate] window] rootViewController];
     while (rootViewController.presentedViewController) {
         rootViewController = rootViewController.presentedViewController;
     }
-    
+
     [rootViewController presentViewController:documentPicker animated:YES completion:nil];
 }
 
 - (NSMutableDictionary *)getMetadataForUrl:(NSURL *)url error:(NSError **)error
 {
     __block NSMutableDictionary* result = [NSMutableDictionary dictionary];
-    
+
     [url startAccessingSecurityScopedResource];
-    
+
     NSFileCoordinator *coordinator = [[NSFileCoordinator alloc] init];
     __block NSError *fileError;
-    
+
     [coordinator coordinateReadingItemAtURL:url options:NSFileCoordinatorReadingResolvesSymbolicLink error:&fileError byAccessor:^(NSURL *newURL) {
-        
+
         if (!fileError) {
             [result setValue:newURL.absoluteString forKey:FIELD_URI];
             [result setValue:[newURL lastPathComponent] forKey:FIELD_NAME];
-            
+
             NSError *attributesError = nil;
             NSDictionary *fileAttributes = [[NSFileManager defaultManager] attributesOfItemAtPath:newURL.path error:&attributesError];
             if(!attributesError) {
@@ -98,21 +98,21 @@ RCT_EXPORT_METHOD(pick:(NSDictionary *)options
             } else {
                 NSLog(@"%@", attributesError);
             }
-            
+
             if ( newURL.pathExtension != nil ) {
                 CFStringRef extension = (__bridge CFStringRef)[newURL pathExtension];
                 CFStringRef uti = UTTypeCreatePreferredIdentifierForTag(kUTTagClassFilenameExtension, extension, NULL);
                 CFStringRef mimeType = UTTypeCopyPreferredTagWithClass(uti, kUTTagClassMIMEType);
                 CFRelease(uti);
-                
+
                 NSString *mimeTypeString = (__bridge_transfer NSString *)mimeType;
                 [result setValue:mimeTypeString forKey:FIELD_TYPE];
             }
         }
     }];
-    
+
     [url stopAccessingSecurityScopedResource];
-    
+
     if (fileError) {
         *error = fileError;
         return nil;
@@ -124,11 +124,11 @@ RCT_EXPORT_METHOD(pick:(NSDictionary *)options
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentAtURL:(NSURL *)url
 {
     if (controller.documentPickerMode == UIDocumentPickerModeImport) {
-        RCTPromiseResolveBlock resolve = [composeResolvers lastObject];
-        RCTPromiseRejectBlock reject = [composeRejecters lastObject];
-        [composeResolvers removeLastObject];
-        [composeRejecters removeLastObject];
-        
+        RCTPromiseResolveBlock resolve = [[self composeResolvers] lastObject];
+        RCTPromiseRejectBlock reject = [[self composeRejecters] lastObject];
+        [[self composeResolvers] removeLastObject];
+        [[self composeRejecters] removeLastObject];
+
         NSError *error;
         NSMutableDictionary* result = [self getMetadataForUrl:url error:&error];
         if (result) {
@@ -143,11 +143,11 @@ RCT_EXPORT_METHOD(pick:(NSDictionary *)options
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
 {
     if (controller.documentPickerMode == UIDocumentPickerModeImport) {
-        RCTPromiseResolveBlock resolve = [composeResolvers lastObject];
-        RCTPromiseRejectBlock reject = [composeRejecters lastObject];
-        [composeResolvers removeLastObject];
-        [composeRejecters removeLastObject];
-        
+        RCTPromiseResolveBlock resolve = [[self composeResolvers] lastObject];
+        RCTPromiseRejectBlock reject = [[self composeRejecters] lastObject];
+        [[self composeResolvers] removeLastObject];
+        [[self composeRejecters] removeLastObject];
+
         NSMutableArray *results = [NSMutableArray array];
         for (id url in urls) {
             NSError *error;
@@ -159,7 +159,7 @@ RCT_EXPORT_METHOD(pick:(NSDictionary *)options
                 return;
             }
         }
-        
+
         resolve(results);
     }
 }
@@ -167,12 +167,26 @@ RCT_EXPORT_METHOD(pick:(NSDictionary *)options
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller
 {
     if (controller.documentPickerMode == UIDocumentPickerModeImport) {
-        RCTPromiseRejectBlock reject = [composeRejecters lastObject];
-        [composeResolvers removeLastObject];
-        [composeRejecters removeLastObject];
-        
+        RCTPromiseRejectBlock reject = [[self composeRejecters] lastObject];
+        [[self composeResolvers] removeLastObject];
+        [[self composeRejecters] removeLastObject];
+
         reject(E_DOCUMENT_PICKER_CANCELED, @"User canceled document picker", nil);
     }
+}
+
+- (NSMutableArray *)composeResolvers {
+    if(_composeResolvers == nil) {
+        _composeResolvers = [[NSMutableArray alloc] init];
+    }
+    return _composeResolvers;
+}
+
+- (NSMutableArray *)composeRejecters {
+    if(_composeRejecters == nil) {
+        _composeRejecters = [[NSMutableArray alloc] init];
+    }
+    return _composeRejecters;
 }
 
 @end
